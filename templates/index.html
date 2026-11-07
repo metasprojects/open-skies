@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Skies</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+<!-- Leaflet is bundled (static/vendor, BSD-2-Clause): the page talks to nothing but this app. -->
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <img src="/static/logo.svg" alt="" class="logo">
+  <h1>Open Skies</h1>
+  <span class="byline">real places for Nuclear Option &middot; v{{ version }}</span>
+  <span class="spacer"></span>
+  <button type="button" id="setupChip" class="chip" hidden>Setup</button>
+  <button type="button" id="creditsBtn" class="linkish">Credits</button>
+  <button type="button" id="quitBtn" class="linkish">Quit</button>
+</header>
+
+<main>
+  <section id="map-pane">
+    <div id="search-box">
+      <input id="searchInput" type="search" autocomplete="off" placeholder="Search for a place and press Enter">
+      <ul id="searchResults" hidden></ul>
+    </div>
+    <div id="map"></div>
+    <div id="map-hint">Click the map to put the box there. Drag the box to move it, drag its corner to change the size.</div>
+  </section>
+
+  <aside id="controls">
+    <section class="panel setup-card" id="setupCard" hidden>
+      <h2>Setup incomplete</h2>
+      <p class="muted">Fix these once and Open Skies can build and install maps. Each line says how.</p>
+      <ul class="setup-list" id="setupList"></ul>
+      <div id="setupNotes"></div>
+      <div class="row">
+        <button type="button" class="btn" id="recheckBtn">Check again</button>
+        <button type="button" class="btn ghost" id="hideSetupBtn">Hide</button>
+      </div>
+      <div id="setupMsg" class="msg" hidden></div>
+    </section>
+
+    <section class="panel" id="areaCard">
+      <h2><span class="num">1</span> Area</h2>
+      <div id="areaInfo" class="area-info">Search for a place or click the map.</div>
+      <label class="field">Map size
+        <select id="tilesSelect">
+          <option value="51" selected>261 km square (full size, 51 tiles)</option>
+          <option value="39">200 km square (39 tiles)</option>
+          <option value="31">159 km square (31 tiles)</option>
+          <option value="21">108 km square (21 tiles, quick test)</option>
+          <option value="11">56 km square (11 tiles, smallest)</option>
+        </select>
+      </label>
+      <ul id="areaProblems" class="problems" hidden></ul>
+    </section>
+
+    <section class="panel" id="airportCard">
+      <h2><span class="num">2</span> Airbases</h2>
+      <p class="muted" id="airportSummary">Real airports inside the box appear here. Tick the ones you want and pick a side for each.</p>
+      <label class="check small"><input type="checkbox" id="showSmall"> show small airfields</label>
+      <ul id="airportList" class="airports"></ul>
+    </section>
+
+    <section class="panel" id="nameCard">
+      <h2><span class="num">3</span> Name</h2>
+      <label class="field">Map name <span class="muted">(as the game shows it)</span>
+        <input type="text" id="mapName" maxlength="40" placeholder="e.g. Taiwan Strait">
+      </label>
+      <label class="field">Made by <span class="muted">(optional)</span>
+        <input type="text" id="author" maxlength="40" placeholder="your name">
+      </label>
+      <label class="check"><input type="checkbox" id="shipLanes" checked>
+        Ship lanes from real ship traffic <span class="muted" id="shipNote">(downloads {{ shipping_mb }} MB once)</span></label>
+      <div class="muted small" id="idNote"></div>
+    </section>
+
+    <section class="panel" id="buildCard">
+      <h2><span class="num">4</span> Build</h2>
+      <ul id="buildProblems" class="problems" hidden></ul>
+      <div class="row">
+        <button type="button" class="btn primary" id="buildBtn">Build map</button>
+        <button type="button" class="btn ghost" id="stopBtn" hidden>Stop</button>
+      </div>
+      <p class="muted small">A full-size map takes about 30 to 60 minutes: downloads first (kept for next time), then Unity.</p>
+      <div id="progress" hidden>
+        <div class="stage-line"><span id="stageLabel"></span><span id="stageCount" class="muted"></span></div>
+        <div class="bar"><div id="bar" class="bar-fill"></div></div>
+        <div id="stageDetail" class="detail"></div>
+        <div id="stageHint" class="muted small"></div>
+        <div class="muted small" id="elapsed"></div>
+        <ol id="stageList" class="stages"></ol>
+        <ul id="notes" class="notes"></ul>
+      </div>
+      <div id="errorBox" class="error" hidden>
+        <div id="errorTitle" class="error-title"></div>
+        <div id="errorFix"></div>
+        <div class="row">
+          <button type="button" class="btn small" id="detailsBtn">Show details</button>
+          <button type="button" class="btn small ghost" id="logsBtn">Open logs folder</button>
+        </div>
+        <pre id="errorDetails" hidden></pre>
+      </div>
+    </section>
+
+    <section class="panel" id="mapsCard">
+      <h2><span class="num">5</span> Your maps</h2>
+      <div id="mapsList" class="muted">Finished maps appear here, ready to install.</div>
+      <div id="copyBox" class="msg" hidden></div>
+    </section>
+  </aside>
+</main>
+
+<dialog id="credits">
+  <h2>Credits</h2>
+  <p><b>Open Skies</b> builds Nuclear Option maps from open data. Every map carries these credits:</p>
+  <ul>
+    <li>Elevation: Copernicus WorldDEM-30 &copy; DLR e.V. 2010-2014 and &copy; Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA.</li>
+    <li>Land cover: ESA WorldCover 10 m 2021 v200 (CC BY 4.0).</li>
+    <li>Roads, buildings, ferries, places: &copy; OpenStreetMap contributors, Overture Maps Foundation (ODbL). Each map's data can be exported with <i>Export OSM data</i>.</li>
+    <li>Ship traffic: World Bank / IMF Global Shipping Traffic Density (CC BY 4.0).</li>
+    <li>Airports: OurAirports (public domain). Sea floor: AWS Terrain Tiles (ETOPO1, GEBCO, NOAA).</li>
+    <li>Map background and search: &copy; OpenStreetMap contributors, Nominatim.</li>
+  </ul>
+  <p>Built on <b>NOCustomMaps</b> (MIT, BatongMaster) and <b>BepInEx</b> (LGPL-2.1). Window and setup modelled on <b>KnoxMap</b> (MIT, euclid80tr). Map widget: <b>Leaflet</b> (BSD-2-Clause).</p>
+  <p class="muted">This project is an unofficial community modification and is not affiliated with, sponsored by, or endorsed by Shockfront Studios Pty Ltd. Original Nuclear Option assets, vehicle designs, audio, and code are Copyright &copy; 2026 Shockfront Studios Pty Ltd. All rights reserved. Nuclear Option and Shockfront Studios are trademarks or registered trademarks of Shockfront Studios Pty Ltd. Original mod content and all other trademarks belong to their respective owners. Open Skies contains no game files.</p>
+  <form method="dialog"><button class="btn">Close</button></form>
+</dialog>
+
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# The app
+flask>=3.0,<4
+pywebview>=5.0,<7
+requests==2.34.2
+# The map pipeline, at the versions NO-Earth's pipeline is tested with
+numpy==2.4.6
+scipy==1.17.1
+rasterio==1.4.4
+pyproj==3.7.2
+shapely==2.2.0
+duckdb==2.0.0
+scikit-image==0.26.0
+pillow==13.0.0
