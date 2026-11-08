@@ -300,7 +300,7 @@ def _reveal(p: Path):
         pass
 
 
-# ---- closed beta: problem reports and the update notice ---------------------------------------------
+# ---- problem reports and the update notice ---------------------------------------------
 
 @app.route("/api/report", methods=["POST"])
 def report_problem():

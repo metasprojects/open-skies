@@ -135,10 +135,12 @@ with tempfile.TemporaryDirectory(dir=ROOT / "cache") as tmp:
     rec = updates.check(cache_file=cache, now=1000.0 + 90000, fetch=lambda url: (404, b""))
     check("private repo (404) is silent", rec.get("latest") is None and "404" not in str(updates.status(cache)["newer"]),
           rec.get("result"))
-    rec = updates.check(cache_file=cache, now=1000.0 + 200000, fetch=lambda url: (200, json.dumps(rels).encode()))
+    # a release newer than any real version, so this keeps working after every bump
+    later = rels + [{"tag_name": "v99.1.0", "html_url": "https://github.com/metasprojects/open-skies/releases/tag/v99.1.0"}]
+    rec = updates.check(cache_file=cache, now=1000.0 + 200000, fetch=lambda url: (200, json.dumps(later).encode()))
     st = updates.status(cache)
-    check("newer release shows", bool(st["newer"]) and st["newer"]["version"] == "0.1.0-beta.10", st)
-    updates.dismiss("0.1.0-beta.10", cache)
+    check("newer release shows", bool(st["newer"]) and st["newer"]["version"] == "99.1.0", st)
+    updates.dismiss("99.1.0", cache)
     check("dismissed release hides", updates.status(cache)["newer"] is None)
 
 # 9. Problem report: the user name, home folder and computer name come out everywhere.

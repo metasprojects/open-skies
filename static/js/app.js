@@ -386,7 +386,7 @@ $("quitBtn").addEventListener("click", async () => {
   catch (e) { alert(`${e.message} ${(e.data && e.data.error && e.data.error.fix) || ""}`); }
 });
 
-/* ---- closed beta: report a problem, and the update notice ---------------------------------------- */
+/* ---- report a problem, and the update notice ---------------------------------------- */
 async function reportProblem() {
   const dlg = $("reportDlg"), body = $("reportBody"), logs = $("reportLogsBtn");
   if (!dlg || !body) return;
@@ -398,7 +398,7 @@ async function reportProblem() {
   try {
     const r = await api("/api/report", {});
     body.innerHTML = `<p>Saved <b>${esc(r.name)}</b> (${esc(r.sizeMB)} MB) in the Open Skies <b>logs</b> folder. A window is showing it.</p>
-      <p><b>Send that file to whoever gave you Open Skies</b> (email, Discord or a Drive link), and say what you did and what happened.</p>
+      <p><b>Attach that file to an issue at github.com/metasprojects/open-skies/issues</b>, and say what you did and what happened.</p>
       <p class="muted small">Inside: the Open Skies logs, the setup check, the Windows version, free memory and disk space. Your Windows user name and home folder are taken out. No maps, downloads or settings are included.</p>`;
   } catch (e) {
     const er = (e.data && e.data.error) || { title: e.message };

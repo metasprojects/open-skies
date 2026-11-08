@@ -1,4 +1,4 @@
-"""Report a problem: one zip a closed-beta tester sends to whoever gave them Open Skies.
+"""Report a problem: one zip a player attaches to a GitHub issue.
 
 In it: the logs/*.log files (newest first, about 20 MB at most), the setup check, the current or last build's
 status, the app version, the Windows version, free memory and free disk. In every file the Windows user name
@@ -183,7 +183,7 @@ def _logs(logs_dir: Path, cap: int):
 README = """Open Skies problem report
 =========================
 
-Made by Open Skies' "Report a problem" button. Send this zip to whoever gave you Open Skies.
+Made by Open Skies' "Report a problem" button. Attach this zip to an issue at github.com/metasprojects/open-skies/issues.
 
 What is inside:
   report.json        Open Skies version, Windows version, free memory and disk, which settings are set
@@ -235,6 +235,6 @@ def make_report(logs_dir: Path | None = None, out_dir: Path | None = None, cap: 
     os.replace(part, dest)
     return {"file": str(dest), "name": dest.name, "sizeMB": round(dest.stat().st_size / 2**20, 1),
             "logs": len(taken), "logsLeftOut": len(skipped),
-            "message": f"Saved {dest.name} in the Open Skies logs folder. Send that file to whoever gave you "
-                       "Open Skies. It holds the logs and your PC's setup, with your user name taken out; no maps, "
+            "message": f"Saved {dest.name} in the Open Skies logs folder. Attach that file to an issue at "
+                       "github.com/metasprojects/open-skies/issues. It holds the logs and your PC's setup, with your user name taken out; no maps, "
                        "downloads or settings."}

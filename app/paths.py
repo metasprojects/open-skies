@@ -24,7 +24,7 @@ LOGS = BASE / "logs"
 CONFIG = BASE / "config.json"
 
 APP_NAME = "Open Skies"
-APP_VERSION = "0.1.0-beta.4"
+APP_VERSION = "0.1.0"
 GAME_APPID = "2168680"
 GAME_EXE = "NuclearOption.exe"
 UNITY_VERSION = "2022.3.62f2"

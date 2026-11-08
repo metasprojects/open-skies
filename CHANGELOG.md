@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (in progress)
+## 0.1.0 (2026-11-07)
 
 - Island and coast maps keep their buildings. When part of the map was open sea, every building was lost
   (Oahu had none; it now has about 198,000).
