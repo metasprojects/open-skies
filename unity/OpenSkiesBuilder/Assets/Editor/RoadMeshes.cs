@@ -1,4 +1,4 @@
-// Draws a NO-Earth map's roads: ribbons laid on the terrain, bridge decks with colliders, grouped per
+// Draws an Open Skies map's roads: ribbons laid on the terrain, bridge decks with colliders, grouped per
 // 5,120 m tile like the Swiss Alps map, under <root>/Roads. Called by MapBuilder after the terrain:
 //     NOEarth.RoadMeshes.Build(root, buildDir, half, AssetRoot);
 //

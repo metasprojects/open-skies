@@ -12,8 +12,9 @@ from mapgeo import MapGeo
 
 CREDITS = ("produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH "
            "2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. "
-           "Land cover © ESA WorldCover project 2021 (CC BY 4.0). Roads and places © OpenStreetMap contributors, "
-           "Overture Maps Foundation (ODbL). Ship traffic: World Bank/IMF (CC BY 4.0). Airports: OurAirports.")
+           "Land cover © ESA WorldCover project 2021 (CC BY 4.0). Roads, buildings, places: Overture Maps, © "
+           "OpenStreetMap contributors and others (list in README.txt). Ship traffic: World Bank/IMF "
+           "(CC BY 4.0). Airports: OurAirports.")
 NOTICE = ("The organisations in charge of the Copernicus programme by law or by delegation do not incur any liability "
           "for any use of the Copernicus WorldDEM-30. Airbus Defence and Space, DLR, ESA, the European Union and "
           "Copernicus do not endorse this map, its author or any use made of it. Anyone who receives this map, or "
@@ -51,7 +52,7 @@ def main(cfg_path, build_dir):
     prefix = 16 + fnv1a64(mid) % 96
     root = "".join(w.capitalize() for w in c["displayName"].split())
     credits = CREDITS + (" Sea floor: NOAA NCEI ETOPO 2022." if c.get("seaFloor") == "etopo2022"
-                         else " Sea floor: AWS Terrain Tiles (GEBCO, NOAA, others).")
+                         else " Sea floor: AWS Terrain Tiles.")
     m = {
         "mapId": mid, "displayName": c["displayName"], "version": c["version"], "author": c["author"],
         "tagColor": c.get("tagColor", ""), "builtAgainstGameHash": c.get("builtAgainstGameHash", ""),
@@ -72,7 +73,8 @@ def main(cfg_path, build_dir):
         "camera": c.get("camera", {"x": -20000, "y": 3000, "z": 20000, "pitch": 8, "yaw": 110, "roll": 0}),
     }
     # Optional layers: present when their pipeline stage has run.
-    for key, stem in (("seaLanes", "sealanes"), ("roadNetwork", "roads")):
+    for key, stem in (("seaLanes", "sealanes"), ("roadNetwork", "roads"), ("cityPlacements", "cities"),
+                      ("treePositions", "trees")):
         if (Path(build_dir) / f"{stem}.bytes").exists():
             m["assets"][key] = f"{mid}_{stem}"
     assert len(credits) <= 440, len(credits)

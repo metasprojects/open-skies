@@ -41,6 +41,7 @@ SAND = np.array([200, 174, 132], np.float32)      # bare ground on desert maps
 SCRUB = np.array([164, 150, 108], np.float32)     # arid shrubland
 SHALLOW = np.array([150, 160, 130], np.float32)
 DEEP = np.array([40, 70, 100], np.float32)
+RIVER = np.array([66, 86, 94], np.float32)       # inland water above sea level (rivers, lakes): dark slate
 
 
 class Cover:
@@ -79,8 +80,9 @@ def heights_rows(h, size, r0, r1):
 
 
 def fix_cover(lc, land):
-    lc = np.where(land & (lc == 0), 30, lc)
-    return np.where(land & (lc == 80), 90, lc).astype(np.uint8)
+    """Fill gaps with grass. Inland water (80 on land) stays 80: splats() grows it as wetland ground, the macro
+    colour paints it as water and grass blades stay out of it."""
+    return np.where(land & (lc == 0), 30, lc).astype(np.uint8)
 
 
 def slope_deg(hs, px):
@@ -109,7 +111,7 @@ def splats(geo, h, cover4, b):
         "rock": rock,
         "lush": np.isin(lc, (10, 95)) * free,
         "fields": (lc == 40) * free,
-        "grass": (np.isin(lc, (20, 30, 90)) + 0.5 * built) * free,
+        "grass": (np.isin(lc, (20, 30, 80, 90)) + 0.5 * built) * free,
     }
     total = sum(layers.values()) + 1e-6
     for k, w in layers.items():
@@ -145,7 +147,7 @@ def macro_and_chart(geo, h, cover8, b):
             layers += [(lc == 60, SAND, 0.85), (lc == 20, SCRUB, 0.6)]
         else:
             layers += [(lc == 60, BARE, 0.6)]
-        layers += [(lc == 70, PEAK, 0.8), (steep * (1 - high), ROCKC, 0.45)]
+        layers += [(lc == 70, PEAK, 0.8), (steep * (1 - high), ROCKC, 0.45), (lc == 80, RIVER, 0.85)]
         for mask, colour, amount in layers:
             k = ndimage.gaussian_filter(mask.astype(np.float32), 1.5)[..., None] * amount
             col = col * (1 - k) + colour * k

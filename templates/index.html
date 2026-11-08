@@ -16,9 +16,17 @@
   <span class="byline">real places for Nuclear Option &middot; v{{ version }}</span>
   <span class="spacer"></span>
   <button type="button" id="setupChip" class="chip" hidden>Setup</button>
+  <button type="button" id="reportBtn" class="linkish" data-report title="Save one file with the logs to send to whoever gave you Open Skies">Report a problem</button>
   <button type="button" id="creditsBtn" class="linkish">Credits</button>
   <button type="button" id="quitBtn" class="linkish">Quit</button>
 </header>
+<div id="updateBanner" class="update-banner" hidden>
+  <span class="update-tag">Update</span>
+  <span id="updateText"></span>
+  <a id="updateLink" href="#" target="_blank" rel="noopener noreferrer">See the new version</a>
+  <span class="spacer"></span>
+  <button type="button" id="updateDismiss" class="linkish" title="Hide this notice" aria-label="Hide this notice">&times;</button>
+</div>
 
 <main>
   <section id="map-pane">
@@ -101,6 +109,7 @@
         <div class="row">
           <button type="button" class="btn small" id="detailsBtn">Show details</button>
           <button type="button" class="btn small ghost" id="logsBtn">Open logs folder</button>
+          <button type="button" class="btn small ghost" data-report>Report a problem</button>
         </div>
         <pre id="errorDetails" hidden></pre>
       </div>
@@ -120,14 +129,23 @@
   <ul>
     <li>Elevation: Copernicus WorldDEM-30 &copy; DLR e.V. 2010-2014 and &copy; Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA.</li>
     <li>Land cover: ESA WorldCover 10 m 2021 v200 (CC BY 4.0).</li>
-    <li>Roads, buildings, ferries, places: &copy; OpenStreetMap contributors, Overture Maps Foundation (ODbL). Each map's data can be exported with <i>Export OSM data</i>.</li>
+    <li>Roads, buildings, ferries, water and places: Overture Maps Foundation. Roads: &copy; OpenStreetMap contributors, TomTom (ODbL). Buildings: &copy; OpenStreetMap contributors, Esri Community Maps contributors (CC BY 4.0), Microsoft Global ML Building Footprints (ODbL), Google Open Buildings (CC BY 4.0), USGS 3D Elevation Program, Qian Shi et al. 2023 (CC BY 4.0), BTN 2024 ign.es (CC BY 4.0). Water and land use: &copy; OpenStreetMap contributors, Daylight, ESA WorldCover 2020 (CC BY 4.0), ETOPO1, GLOBathy. Places: Meta, DAC, BrightQuery, Uberall, OpenTravel Alliance (CDLA Permissive 2.0). Each map's OpenStreetMap data can be exported with <i>Export OSM data</i>.</li>
     <li>Ship traffic: World Bank / IMF Global Shipping Traffic Density (CC BY 4.0).</li>
-    <li>Airports: OurAirports (public domain). Sea floor: AWS Terrain Tiles (ETOPO1, GEBCO, NOAA).</li>
+    <li>Airports: OurAirports (public domain). Sea floor: AWS Terrain Tiles (ETOPO1, GEBCO, NOAA; <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank">sources</a>).</li>
     <li>Map background and search: &copy; OpenStreetMap contributors, Nominatim.</li>
   </ul>
   <p>Built on <b>NOCustomMaps</b> (MIT, BatongMaster) and <b>BepInEx</b> (LGPL-2.1). Window and setup modelled on <b>KnoxMap</b> (MIT, euclid80tr). Map widget: <b>Leaflet</b> (BSD-2-Clause).</p>
   <p class="muted">This project is an unofficial community modification and is not affiliated with, sponsored by, or endorsed by Shockfront Studios Pty Ltd. Original Nuclear Option assets, vehicle designs, audio, and code are Copyright &copy; 2026 Shockfront Studios Pty Ltd. All rights reserved. Nuclear Option and Shockfront Studios are trademarks or registered trademarks of Shockfront Studios Pty Ltd. Original mod content and all other trademarks belong to their respective owners. Open Skies contains no game files.</p>
   <form method="dialog"><button class="btn">Close</button></form>
+</dialog>
+
+<dialog id="reportDlg">
+  <h2>Report a problem</h2>
+  <div id="reportBody"></div>
+  <div class="row">
+    <button type="button" class="btn ghost" id="reportLogsBtn" hidden>Open logs folder</button>
+    <form method="dialog"><button class="btn">Close</button></form>
+  </div>
 </dialog>
 
 <script src="/static/vendor/leaflet/leaflet.js"></script>

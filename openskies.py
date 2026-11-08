@@ -53,6 +53,8 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=0)
     a = ap.parse_args()
     import app.server  # noqa: F401 - fail here, where it can be reported, not in the thread
+    from app import updates
+    updates.start_background_check()      # at most one GitHub request a day, in the background, silent offline
 
     port = a.port or free_port()
     url = f"http://127.0.0.1:{port}/"

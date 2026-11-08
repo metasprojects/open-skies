@@ -18,6 +18,14 @@ SHIP_Y = {"Corvette1": 7.82, "SmallCarrier1": 6.25, "AssaultCarrier1": 5.78, "Fr
           "FleetCarrier1": 5.71, "Destroyer1": 7.34, "LandingCraft1": 9.23}
 # Units spawn at exactly this height above the terrain collider; the game does not snap them down.
 GROUND_CLEARANCE = 0.3
+# Rough footprint radius (m) of mission-placed buildings, and half the gap kept between two vehicles. A vehicle is
+# never placed inside a mission building or on another vehicle: in the 2026-11-07 tests Black Buck's radar SAM had
+# snapped onto the very spot of the radar station it guards (both searched outward to the same patch of ground) and
+# sat 24 m inside it.
+FOOTPRINT = {"radarStation1": 40.0, "hangar_med": 45.0, "shelter1": 25.0, "Helipad": 20.0, "ammoDump": 30.0,
+             "ammunitionBunker": 25.0, "fuelTank1": 20.0, "storageTank": 20.0, "factory_large": 70.0,
+             "factory_tall": 50.0}
+VEHICLE_HALF_GAP = 6.0
 ALL_AIRCRAFT = ["COIN", "trainer", "AttackHelo1", "Fighter1", "SmallFighter1", "QuadVTOL1", "Multirole1", "EW1",
                 "Darkreach", "UtilityHelo1", "CAS1", "FastBomber1", "VTOLTrainer1"]
 
@@ -82,6 +90,16 @@ class MissionBuilder:
         self.m[kind].append(u)
         return u["UniqueName"]
 
+    def clash(self, x, z, r, kinds=("buildings", "vehicles")):
+        """What a new object of radius r at (x, z) would overlap among the buildings and vehicles placed so far."""
+        for key in kinds:
+            for u in self.m[key]:
+                p = u["globalPosition"]
+                ur = FOOTPRINT.get(u["type"], 30.0) if key == "buildings" else VEHICLE_HALF_GAP
+                if (p["x"] - x) ** 2 + (p["z"] - z) ** 2 < (ur + r) ** 2:
+                    return f"against {u['UniqueName']}"
+        return None
+
     def vehicle(self, utype, faction, x, z, yaw=0.0, name=None, hold=True, skill=0.8, waypoints=None, search=600.0):
         # A vehicle with a route is always held. An unheld vehicle with no player order keeps re-aiming itself at
         # the nearest objective or enemy (seen in headless runs), which overrides mission waypoints: the
@@ -90,7 +108,7 @@ class MissionBuilder:
         # vehicles whose first waypoint waits for an objective).
         if waypoints:
             hold = True
-        p = self.g.find_ground(x, z, radius=search)
+        p = self.g.find(x, z, lambda a, b: self.g.ground_problem(a, b) or self.clash(a, b, VEHICLE_HALF_GAP), search)
         if p is None:
             self.problems.append(f"no valid ground for {name or utype} near ({x:.0f}, {z:.0f})")
             return None
@@ -100,7 +118,8 @@ class MissionBuilder:
 
     def building(self, utype, faction, x, z, yaw=0.0, name=None, airbase="", capturable=False, production=None,
                  search=600.0):
-        p = self.g.find_ground(x, z, radius=search, max_slope=8.0)
+        r = FOOTPRINT.get(utype, 30.0)
+        p = self.g.find(x, z, lambda a, b: self.g.ground_problem(a, b, max_slope=8.0) or self.clash(a, b, r), search)
         if p is None:
             self.problems.append(f"no valid ground for building {name or utype} near ({x:.0f}, {z:.0f})")
             return None
@@ -156,7 +175,7 @@ class MissionBuilder:
                                  waypoints=[dict(w) for w in (waypoints or [])]))
         return [u for u in out if u]
 
-    def furnish_airbase(self, base, faction, hangars=4, shelters=4, helipads=2):
+    def furnish_airbase(self, base, faction, hangars=4, shelters=4, helipads=2, bare_ok=False):
         """Hangars, shelters, helipads and a tower for one airbase, attached to it by name.
 
         Since NOCustomMaps 1.3 (2026-09-19) the loader stands nothing on a custom airfield: "a mission puts its
@@ -172,20 +191,27 @@ class MissionBuilder:
         inner = base.get("runwayWidth", 45.0) / 2 + 140.0
         outer = base["flatHalfAcross"] - 120.0
         if outer - inner < 120.0:
-            self.problems.append(f"{name}: no apron band on the levelled ground for hangars")
+            if bare_ok:
+                print(f"  note: {name}: no apron band on the levelled ground; left bare (no aircraft spawn there)")
+            else:
+                self.problems.append(f"{name}: no apron band on the levelled ground for hangars")
             return []
         along_half = base["flatHalfAlong"]
         s, c = math.sin(math.radians(hdg)), math.cos(math.radians(hdg))
-        best = None
-        for side in (1, -1):
-            # unit vector across the runway towards this side
-            ax, az = c * side, -s * side
-            pts = [(base["x"] + ax * (inner + 60) + s * t, base["z"] + az * (inner + 60) + c * t)
-                   for t in (-0.3 * along_half, 0.0, 0.3 * along_half)]
-            ok = sum(abs(self.g.height(x, z) - base["y"]) < 3.0 for x, z in pts)
-            if best is None or ok > best[0]:
-                best = (ok, ax, az)
-        _, ax, az = best
+        # The apron side is decided once (tools/apron_side.py, stored in airbases.json) so these buildings stand on
+        # the apron the Unity stage paves; older builds without it fall back to the flattest side.
+        side = base.get("apronSide")
+        if side is None:
+            best = None
+            for sd in (1, -1):
+                bx, bz = c * sd, -s * sd
+                pts = [(base["x"] + bx * (inner + 60) + s * t, base["z"] + bz * (inner + 60) + c * t)
+                       for t in (-0.3 * along_half, 0.0, 0.3 * along_half)]
+                ok = sum(abs(self.g.height(x, z) - base["y"]) < 3.0 for x, z in pts)
+                if best is None or ok > best[0]:
+                    best = (ok, sd)
+            side = best[1]
+        ax, az = c * side, -s * side
         face = math.degrees(math.atan2(-ax, -az)) % 360           # doors towards the runway
         out, taken = [], []
 
@@ -198,7 +224,8 @@ class MissionBuilder:
                 z = base["z"] + az * across + c * along
                 if (self.g.ground_problem(x, z, building_clear=0) is None
                         and abs(self.g.height(x, z) - base["y"]) < 4.0
-                        and all(math.dist((x, z), q) > 0.8 * step for q in taken)):
+                        and all(math.dist((x, z), q) > 0.8 * step for q in taken)
+                        and self.clash(x, z, FOOTPRINT.get(utype, 30.0), kinds=("vehicles",)) is None):
                     taken.append((x, z))
                     out.append(self._unit("buildings", utype, faction, x, self.g.height(x, z), z, face, label, {
                         "capturable": False, "Airbase": name, "placementOffset": 0.0}))
@@ -221,18 +248,21 @@ class MissionBuilder:
                 if put(utype, along0, direction, across, f"{tag}_{label}", step):
                     placed[utype] += 1
         if placed["hangar_med"] + placed["shelter1"] == 0:
-            self.problems.append(f"{name}: no room for a single hangar on the apron")
+            if bare_ok:
+                print(f"  note: {name}: no room for a single hangar on the apron; left bare (no aircraft spawn there)")
+            else:
+                self.problems.append(f"{name}: no room for a single hangar on the apron")
         elif placed["hangar_med"] < hangars or placed["shelter1"] < shelters:
             print(f"  note: {name}: {placed['hangar_med']} hangars and {placed['shelter1']} shelters fit "
                   f"(asked {hangars} and {shelters})")
         return out
 
-    def furnish_airbases(self, bases):
+    def furnish_airbases(self, bases, bare_ok=False):
         """furnish_airbase for every airbase on the map, each for the side that holds it in this mission (the
-        mission's airbase override if it has one, else the map's own side)."""
+        mission's airbase override if it has one, else the map's own side). bare_ok: see furnish_airbase."""
         owner = {a["UniqueName"]: a.get("faction") for a in self.m["airbases"]}
         for b in bases:
-            self.furnish_airbase(b, owner.get(b["uniqueName"]) or b["faction"])
+            self.furnish_airbase(b, owner.get(b["uniqueName"]) or b["faction"], bare_ok=bare_ok)
 
     @staticmethod
     def waypoint(x, z, objective="Unit Spawn", y=0.0):

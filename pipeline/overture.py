@@ -131,6 +131,15 @@ def fetch(c, cfg_path, out_dir):
                           f"TO '{writing.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)")
                 writing.replace(piece)
             pieces.append(piece)
+        # A strip that is all open sea comes out with 0 rows, no GeoParquet 'geo' metadata and geometry as a
+        # plain BLOB; merged in, it turns the whole file's geometry into BLOB and buildings.py's ST_Transform
+        # fails (every building lost on Oahu). Merge only the pieces that hold features.
+        full = [p for p in pieces if c.execute(f"SELECT count(*) FROM read_parquet('{p.as_posix()}')").fetchone()[0]]
+        full = full or pieces[:1]
+        for p in pieces:
+            if p not in full:
+                p.unlink()
+        pieces = full
         if len(pieces) == 1:
             pieces[0].replace(dest)                          # one piece: it already is the file
         else:

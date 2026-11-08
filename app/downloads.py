@@ -27,7 +27,7 @@ SHIPPING = {
 SHIPPING_MB = round(sum(s for _, s in SHIPPING.values()) / 1e6)
 
 OVERTURE_BUCKET = "https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com"
-OVERTURE_PINNED = "2026-10-21.0"   # the release NO-Earth's queries were written against
+OVERTURE_PINNED = "2026-10-21.0"   # the release the map engine's queries were written against
 
 
 class DownloadError(RuntimeError):

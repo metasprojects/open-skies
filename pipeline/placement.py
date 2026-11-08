@@ -1,7 +1,8 @@
-"""Placement checker: where a unit may stand on a NO-Earth map, and a validator for whole missions.
+"""Placement checker: where a unit may stand on an Open Skies map, and a validator for whole missions.
 
 Game frame: x east, z north, metres from the map centre; y up. Uses the build folder's heights.npy
-(row 0 = north edge), buildings.npz (real building footprints) and airbases.json (levelled pads, runways).
+(row 0 = north edge), buildings.npz (real building footprints), cities.bytes (generic town blocks) and airbases.json
+(levelled pads, runways). The mission builder also keeps units off the buildings and vehicles the mission itself places.
 
 Rules (see docs/MISSION-PLAYBOOK.md section 7):
   ground units and buildings: on dry land, slope under MAX_SLOPE, clear of real buildings, off runways
@@ -47,6 +48,23 @@ class MapGround:
             self.btree = cKDTree(self.bxz)
         else:
             self.btree = None
+        # The generic town blocks cities.py stands in built-up areas (cities.bytes): oriented rectangles up to
+        # 163 m long. Units must keep clear of them too: in the 2026-11-07 tests a garrison tank on Lofoten sat
+        # inside the end of a 116 m suburban block.
+        self.ttree = None
+        cb = b / "cities.bytes"
+        if cb.exists():
+            raw = cb.read_bytes()
+            count = int.from_bytes(raw[8:12], "little")
+            rec = np.dtype([("t", "u1"), ("pad", "V3"), ("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("yaw", "<f4")])
+            t = np.frombuffer(raw[12:12 + 20 * count], dtype=rec)
+            if count:
+                from cities import CATALOGUE
+                self.tw = np.array([CATALOGUE[k][1] / 2.0 for k in t["t"]])
+                self.td = np.array([CATALOGUE[k][2] / 2.0 for k in t["t"]])
+                self.txz = np.column_stack([t["x"], t["z"]]).astype(float)
+                self.tyaw = np.radians(t["yaw"].astype(float))
+                self.ttree = cKDTree(self.txz)
         ab = b / "airbases.json"
         self.airbases = json.loads(ab.read_text(encoding="utf-8")) if ab.exists() else []
         self._dist_land = None
@@ -98,10 +116,17 @@ class MapGround:
 
     # --- features ---
     def near_building(self, x, z, clear=BUILDING_CLEAR):
-        if self.btree is None:
-            return False
-        idx = self.btree.query_ball_point([x, z], r=clear + 80)
-        return any(math.dist((x, z), self.bxz[i]) < self.brad[i] + clear for i in idx)
+        if self.btree is not None:
+            idx = self.btree.query_ball_point([x, z], r=clear + 80)
+            if any(math.dist((x, z), self.bxz[i]) < self.brad[i] + clear for i in idx):
+                return True
+        if self.ttree is not None:
+            for i in self.ttree.query_ball_point([x, z], r=clear + 85):
+                dx, dz = x - self.txz[i][0], z - self.txz[i][1]
+                s, c = math.sin(self.tyaw[i]), math.cos(self.tyaw[i])
+                if abs(dx * c - dz * s) < self.tw[i] + clear and abs(dx * s + dz * c) < self.td[i] + clear:
+                    return True
+        return False
 
     def on_runway(self, x, z, margin=60.0):
         for a in self.airbases:
@@ -189,4 +214,13 @@ def validate(mission, ground):
             problems.append(("aircraft", u["UniqueName"], u["type"], "parked but floating"))
         if not parked and p["y"] - max(g, 0) < 150:
             problems.append(("aircraft", u["UniqueName"], u["type"], "airborne under 150 m"))
+    # vehicles inside a building the mission itself places (the map's own buildings are checked above)
+    from missions import FOOTPRINT        # imported here: missions imports this module
+    blds = [(u["globalPosition"]["x"], u["globalPosition"]["z"], FOOTPRINT.get(u["type"], 30.0), u["UniqueName"])
+            for u in mission.get("buildings", []) or []]
+    for u in mission.get("vehicles", []) or []:
+        p = u["globalPosition"]
+        hit = next((n for bx, bz, r, n in blds if math.hypot(p["x"] - bx, p["z"] - bz) < r), None)
+        if hit:
+            problems.append(("vehicles", u["UniqueName"], u["type"], f"inside mission building {hit}"))
     return problems

@@ -246,9 +246,11 @@ $("detailsBtn").addEventListener("click", async () => {
 $("logsBtn").addEventListener("click", () => api("/api/open", { which: "logs" }));
 
 const STAGES = ["Checking the area", "Elevation", "Land cover", "Roads and buildings", "Ferries", "Ship traffic", "Sea floor",
-  "Height map", "Airbases", "Ground textures", "Buildings", "Roads", "Ship lanes", "Map details", "Unity: map file", "Free Flight mission"];
+  "Height map", "Airbases", "Ground textures", "Buildings", "Roads", "Towns", "Forests", "Airfield aprons", "Runway numbers",
+  "Ship lanes",
+  "Map details", "Unity: map file", "Missions"];
 const KEYS = ["prepare", "elevation", "landcover", "overture", "ferries", "shipping", "seafloor", "heights", "airbases", "textures",
-  "buildings", "roads", "sealanes", "manifest", "unity", "mission"];
+  "buildings", "roads", "towns", "trees", "apron", "idents", "sealanes", "manifest", "unity", "mission"];
 function renderBuild(b) {
   if (!b) return;
   $("progress").hidden = false;
@@ -305,7 +307,7 @@ async function loadMaps() {
     d.innerHTML = `<b>${esc(m.name)}</b> <span class="muted">&middot; ${m.sizeMB.toLocaleString()} MB &middot; ${m.airbases} airbases &middot; built ${esc(m.built)}${m.installed ? " &middot; installed" : ""}</span>
       <div class="thumbs">${m.previews.slice(0, 4).map((p) => `<img src="/preview/${m.mapId}/${p}?t=${encodeURIComponent(m.built)}" alt="${p}" title="${p}">`).join("")}</div>
       <div><code>${esc(m.prefab)}</code></div>
-      <div class="muted small">Mission: ${m.missions.map(esc).join(", ") || "none"}</div>
+      <div class="muted small">Missions: ${m.missions.map(esc).join(", ") || "none"}</div>
       <div class="row"><button class="btn primary small" data-a="install" ${canInstall ? "" : "disabled title='Finish Setup first (BepInEx and NOCustomMaps)'"}>Install into the game</button>
       <button class="btn small ghost" data-a="osm">Export OSM data</button><button class="btn small ghost" data-a="folder">Open folder</button></div>`;
     d.querySelectorAll("img").forEach((img) => img.addEventListener("click", () => window.open(img.src, "_blank")));
@@ -331,8 +333,8 @@ function renderCopy(c) {
   else if (c.error) box.innerHTML = `<b>${esc(c.error.title)}</b><br>${esc(c.error.fix || "")}`;
   else if (c.done && c.done.text) box.textContent = c.done.text;
   else if (c.done) {
-    box.innerHTML = `<b>Installed.</b> Start Nuclear Option: the map is in the Mission Editor's New list, and the mission
-      <b>${esc(c.done.missions.join(", "))}</b> is with your own missions. <span class="muted small">(${esc(c.done.map)})</span>`;
+    box.innerHTML = `<b>Installed.</b> Start Nuclear Option: the map is in the Mission Editor's New list, and ${c.done.missions.length === 1 ? "the mission" : "the missions"}
+      <b>${esc(c.done.missions.join(", "))}</b> ${c.done.missions.length === 1 ? "is" : "are"} with your own missions. <span class="muted small">(${esc(c.done.map)})</span>`;
     if (!S.reloadedAfterCopy) { S.reloadedAfterCopy = true; loadMaps(); }
   }
 }
@@ -384,7 +386,46 @@ $("quitBtn").addEventListener("click", async () => {
   catch (e) { alert(`${e.message} ${(e.data && e.data.error && e.data.error.fix) || ""}`); }
 });
 
+/* ---- closed beta: report a problem, and the update notice ---------------------------------------- */
+async function reportProblem() {
+  const dlg = $("reportDlg"), body = $("reportBody"), logs = $("reportLogsBtn");
+  if (!dlg || !body) return;
+  logs.hidden = true;
+  body.innerHTML = `<p>Making the report: the logs, the setup check and your PC's basics. This takes a few seconds...</p>`;
+  if (!dlg.open) dlg.showModal();
+  const btns = document.querySelectorAll("[data-report]");
+  btns.forEach((b) => { b.disabled = true; });
+  try {
+    const r = await api("/api/report", {});
+    body.innerHTML = `<p>Saved <b>${esc(r.name)}</b> (${esc(r.sizeMB)} MB) in the Open Skies <b>logs</b> folder. A window is showing it.</p>
+      <p><b>Send that file to whoever gave you Open Skies</b> (email, Discord or a Drive link), and say what you did and what happened.</p>
+      <p class="muted small">Inside: the Open Skies logs, the setup check, the Windows version, free memory and disk space. Your Windows user name and home folder are taken out. No maps, downloads or settings are included.</p>`;
+  } catch (e) {
+    const er = (e.data && e.data.error) || { title: e.message };
+    body.innerHTML = `<p><b>The report could not be made.</b> ${esc(er.title)}</p>
+      <p class="muted small">Send the files in the Open Skies logs folder instead.</p>`;
+  }
+  logs.hidden = false;
+  btns.forEach((b) => { b.disabled = false; });
+}
+document.querySelectorAll("[data-report]").forEach((b) => b.addEventListener("click", reportProblem));
+if ($("reportLogsBtn")) $("reportLogsBtn").addEventListener("click", () => api("/api/open", { which: "logs" }).catch(() => {}));
+
+async function checkUpdate(tries = 0) {
+  const bar = $("updateBanner");
+  if (!bar) return;
+  let r;
+  try { r = await api("/api/update"); } catch (e) { return; }   /* offline or an older app: say nothing */
+  if (r.newer && String(r.newer.url || "").startsWith("https://github.com/")) {
+    $("updateText").textContent = `Open Skies ${r.newer.version} is out (you have ${r.current}).`;
+    $("updateLink").href = r.newer.url;
+    bar.hidden = false;
+    $("updateDismiss").onclick = () => { bar.hidden = true; api("/api/update/dismiss", { version: r.newer.version }).catch(() => {}); };
+  } else if (r.checking && tries < 8) setTimeout(() => checkUpdate(tries + 1), 2000);
+}
+
 loadSetup().catch(() => {});
+checkUpdate();
 loadMaps().catch(() => {});
 restoreDraft().catch(() => {});
 poll();

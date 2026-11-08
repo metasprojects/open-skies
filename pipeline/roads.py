@@ -1,4 +1,4 @@
-"""Road network for a NO-Earth map, from Overture road segments (OpenStreetMap).
+"""Road network for an Open Skies map, from Overture road segments (OpenStreetMap).
 
 Writes the network the NOCustomMaps loader hands the game's ground AI (NOROAD02, the format of
 NOCustomMaps Core/RoadData.cs, MIT) and a sidecar that RoadMeshes.cs reads to draw the roads.

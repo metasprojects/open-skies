@@ -1,4 +1,4 @@
-"""One map build, start to finish: the NO-Earth data stages, the Unity stage, the Free Flight mission.
+"""One map build, start to finish: the map data stages, the Unity stage, the missions (Free Flight, Escalation, Strike).
 
 Runs in a background thread of the app. The page polls status(). Every stage is a separate process (the data
 stages are memory-hungry and the app has to stay small), its output goes to logs/build-<map>.log, and a stage that
@@ -11,7 +11,7 @@ Judgement calls the pipeline used to leave to a person are made here:
   - areas Overture has no roads or buildings for: those layers are left out, with a note,
   - sea floor: patchy soundings are filled by the pipeline; a failed download falls back to a modelled sea floor,
   - memory and disk: checked before the heavy stages, with a clear message instead of a crash,
-  - one build at a time on the PC (named mutex shared with NO-Earth's make_map.ps1).
+  - one build at a time on the PC (a named mutex).
 """
 from __future__ import annotations
 
@@ -48,10 +48,14 @@ STAGES = [
     ("textures", "Painting the ground", True, 5),
     ("buildings", "Buildings and towns", False, 3),
     ("roads", "Road network", False, 8),
+    ("towns", "Towns", False, 2),
+    ("trees", "Forests", False, 2),
+    ("apron", "Airfield aprons", True, 1),
+    ("idents", "Runway numbers", True, 1),
     ("sealanes", "Ship lanes", False, 3),
     ("manifest", "Map details and credits", True, 1),
     ("unity", "Making the map file in Unity", True, 35),
-    ("mission", "Free Flight mission", True, 1),
+    ("mission", "Missions", True, 1),
 ]
 LABEL = {k: label for k, label, _, _ in STAGES}
 HINT = {
@@ -63,11 +67,15 @@ HINT = {
     "textures": "A few minutes.",
     "buildings": "A few minutes; longer for big cities.",
     "roads": "The slowest data step: 5 to 20 minutes for a full-size map.",
+    "towns": "About a minute: the real buildings become the game's own houses and shops.",
+    "trees": "About a minute: forests from the land cover.",
     "sealanes": "A few minutes.",
     "unity": "Unity packs the map file: about 10 minutes on a fast PC, longer the first time.",
 }
 WEIGHT = {k: w for k, _, _, w in STAGES}
 OPTIONAL_OUTPUTS = {
+    "towns": ["cities.bytes", "cities_preview.png", "cities_preview_main.png"],
+    "trees": ["trees.bytes", "trees_preview.png"],
     "buildings": ["buildings.npz", "zoning.png"],
     "roads": ["roads.bytes", "roads_draw.json", "roads_stats.json", "roads_profile.npy", "roads_profile_ground.npy",
               "roads_preview.png"],
@@ -139,7 +147,7 @@ def area_problems(lat: float, lon: float, tiles: int) -> list[str]:
     return probs
 
 
-# ---- the named mutex, shared with NO-Earth's make_map.ps1 --------------------------------------------
+# ---- the named mutex: one map build at a time --------------------------------------------
 
 class BuildLock:
     def __init__(self):
@@ -233,7 +241,7 @@ class Job:
             "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1",
             # numpy/scipy thread pools reserve ~250 MB each at import; one thread keeps every stage small.
             "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-            # DuckDB's memory cap: 600 MB on a small or busy PC (the Steam Deck), more when there is room.
+            # DuckDB's memory cap: 600 MB on a small or busy PC, more when there is room.
             "NOEARTH_DUCKDB_MEM": os.environ.get("NOEARTH_DUCKDB_MEM") or ("1500MB" if avail > 8000 else "600MB"),
             "NOEARTH_DUCKDB_DIR": str(paths.CACHE / "duckdb"),
             "NOEARTH_OVERTURE_RELEASE": self.state.get("overtureRelease") or downloads.OVERTURE_PINNED,
@@ -424,6 +432,10 @@ class Job:
         run("textures", lambda: self.run_tool("textures", ["textures.py", cfg, self.view("worldcover"), build]))
         run("buildings", self.buildings)
         run("roads", self.roads)
+        run("towns", self.towns)
+        run("trees", self.trees)
+        run("apron", self.apron)
+        run("idents", self.idents)
         run("sealanes", self.sealanes)
         run("manifest", lambda: self.run_tool("manifest", ["manifest.py", cfg, build]))
 
@@ -604,6 +616,35 @@ class Job:
         except StageError:
             pass                                         # only a picture
 
+    def towns(self):
+        if not (self.build / "buildings.npz").exists():
+            self.skip("towns")
+            return
+        self.mem_check("towns", 900)
+        try:
+            self.run_tool("towns", ["cities.py", self.cfg_path, self.build])
+        except StageError as e:
+            if e.title.startswith("Ran out of memory"):
+                raise
+            self.skip("towns", f"Towns could not be placed ({e.title.rstrip('.')}); the map has no buildings.")
+
+    def trees(self):
+        self.mem_check("trees", 900)
+        try:
+            self.run_tool("trees", ["trees.py", self.cfg_path, self.view("worldcover"), self.build])
+        except StageError as e:
+            if e.title.startswith("Ran out of memory"):
+                raise
+            self.skip("trees", f"Forests could not be planted ({e.title.rstrip('.')}); the map has no trees.")
+
+    def apron(self):
+        sides = self.helper("apron", self.cfg_path, self.build)
+        self.log(f"apron sides: {sides}")
+
+    def idents(self):
+        names = self.helper("idents", self.cfg_path, self.build, paths.CACHE / "ourairports")
+        self.log(f"runway numbers: {names}")
+
     def sealanes(self):
         if "sealanes" in self.state["skipped"] or not self.cfg["openSkies"]["shipLanes"]                 or not downloads.shipping_ready():
             if not self.cfg["openSkies"]["shipLanes"] and "shipping" not in self.state["skipped"]:
@@ -653,6 +694,19 @@ class Job:
             shutil.rmtree(missions, ignore_errors=True)
         tail = self.run_tool("mission", [paths.BASE / "app" / "freeflight.py", self.cfg_path, self.build, prefab,
                                          missions, title])
+        for line in tail:
+            if line.startswith("NOTE: "):
+                self.note(line[6:])
+        # Escalation and Strike (pipeline scenarios). A mission that can't be made here is left out with a note;
+        # these never fail the build: Free Flight is enough to fly the map.
+        self.set(detail="Making the Escalation and Strike missions...")
+        try:
+            tail = self.run_tool("mission", [paths.BASE / "app" / "scenario_missions.py", self.cfg_path, self.build,
+                                             prefab, missions, self.cfg["displayName"]])
+        except StageError as e:
+            self.log(f"NOTE: the Escalation and Strike missions failed: {e.title}")
+            tail = ["NOTE: Only the Free Flight mission was made: the Escalation and Strike missions failed "
+                    "(the log has the details)."]
         for line in tail:
             if line.startswith("NOTE: "):
                 self.note(line[6:])
@@ -710,7 +764,8 @@ def built_map(mid: str) -> dict | None:
     except (OSError, ValueError):
         pass
     missions = sorted(p.name for p in (out / "missions").iterdir() if p.is_dir()) if (out / "missions").exists() else []
-    previews = [f for f in ("preview.png", "roads_preview.png", "zoning.png", "sealanes_preview.png", "map.png")
+    previews = [f for f in ("preview.png", "roads_preview.png", "cities_preview.png", "trees_preview.png",
+                            "sealanes_preview.png", "map.png")
                 if (paths.BUILD / mid / f).exists()]
     return {"mapId": mid, "name": cfg.get("displayName", mid), "sizeMB": round(nomap.stat().st_size / 2**20),
             "prefab": prefab.read_text(encoding="utf-8").strip(), "missions": missions, "previews": previews,
@@ -721,6 +776,8 @@ def built_map(mid: str) -> dict | None:
 def write_readme(cfg, build, out, prefab, title, notes):
     man = json.loads((build / "manifest.json").read_text(encoding="utf-8"))
     ab = json.loads((build / "airbases.json").read_text(encoding="utf-8"))
+    md = out / "missions"
+    folders = (sorted(p.name for p in md.iterdir() if p.is_dir()) if md.exists() else []) or [title]
     lines = [
         f"{cfg['displayName']} - a real-world map for Nuclear Option, made with Open Skies {paths.APP_VERSION}",
         "",
@@ -730,15 +787,28 @@ def write_readme(cfg, build, out, prefab, title, notes):
         "",
         "Needs BepInEx 5 and NOCustomMaps 1.4 or later. Install by copying",
         f"  {cfg['mapId']}.nomap  to  <Nuclear Option>\\BepInEx\\plugins\\NOCustomMaps\\maps\\",
-        f"  missions\\{title}\\  to  %USERPROFILE%\\AppData\\LocalLow\\Shockfront\\NuclearOption\\Missions\\",
+        *[f"  missions\\{t}\\  to  %USERPROFILE%\\AppData\\LocalLow\\Shockfront\\NuclearOption\\Missions\\"
+          for t in folders],
         "(Open Skies' Install button does both.) Every player in a multiplayer game needs this exact build.",
         "",
         "Data credits", "------------", man["credits"], "", man["notice"], "",
-        "Sea floor: AWS Terrain Tiles (Terrarium), from ETOPO1, GEBCO and NOAA coastal models.",
+        "Sea floor: AWS Terrain Tiles (Terrarium), from ETOPO1, GEBCO and NOAA coastal models; sources and credits:",
+        "  https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
         "",
-        "OpenStreetMap data (ODbL): the roads, buildings, ferries and places in this map come from OpenStreetMap",
-        "through Overture Maps and are available under the Open Database License. Open Skies exports the exact",
-        "data used for this map on request (Export OSM data), and anyone who receives the map may ask for it.",
+        "Roads and ferries (Overture Maps transportation, ODbL): (c) OpenStreetMap contributors; TomTom.",
+        "Buildings (Overture Maps buildings, ODbL): (c) OpenStreetMap contributors; Esri Community Maps contributors",
+        "  (CC BY 4.0); Microsoft Global ML Building Footprints (ODbL); Google Open Buildings (CC BY 4.0); USGS 3D",
+        "  Elevation Program; Qian Shi et al., buildings of East Asian countries, Zenodo 2023, doi:10.5281/zenodo.8174931",
+        "  (CC BY 4.0); work derived from BTN 2024, ign.es (CC BY 4.0).",
+        "Water, land use and infrastructure (Overture Maps base, ODbL): (c) OpenStreetMap contributors; Daylight Map",
+        "  Distribution; (c) ESA WorldCover project 2020 / contains modified Copernicus Sentinel data (2020) processed",
+        "  by ESA WorldCover consortium (CC BY 4.0); ETOPO1 (ODC PDDL); GLOBathy (CC0).",
+        "Places (Overture Maps places, CDLA Permissive 2.0): data from Meta, DAC, BrightQuery, Uberall and OpenTravel",
+        "  Alliance.",
+        "",
+        "OpenStreetMap data (ODbL): the roads, buildings, ferries and water in this map come from OpenStreetMap",
+        "and the sources above through Overture Maps, under the Open Database License. Open Skies exports the",
+        "exact data used for this map on request (Export OSM data), and anyone who receives the map may ask for it.",
         "",
         paths.SHOCKFRONT_NOTICE, "It contains no game files. Mods for Nuclear Option may not be sold or put behind "
         "a paywall.",

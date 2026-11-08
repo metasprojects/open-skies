@@ -14,7 +14,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
 
-from . import airports, build, downloads, install, paths, setup_checks, unity
+from . import airports, build, downloads, install, paths, report, setup_checks, unity, updates
 
 app = Flask(__name__, template_folder=str(paths.BASE / "templates"), static_folder=str(paths.BASE / "static"))
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
@@ -220,7 +220,8 @@ def maps():
 
 @app.route("/preview/<mid>/<name>")
 def preview(mid, name):
-    if name not in ("preview.png", "roads_preview.png", "zoning.png", "sealanes_preview.png", "map.png") or \
+    if name not in ("preview.png", "roads_preview.png", "zoning.png", "sealanes_preview.png", "map.png",
+                    "cities_preview.png", "trees_preview.png") or \
             build.sanitise_id(mid) != mid:
         return ("", 404)
     p = paths.BUILD / mid / name
@@ -297,6 +298,29 @@ def _reveal(p: Path):
         subprocess.Popen(["explorer", "/select,", str(p)])
     except OSError:
         pass
+
+
+# ---- closed beta: problem reports and the update notice ---------------------------------------------
+
+@app.route("/api/report", methods=["POST"])
+def report_problem():
+    """One zip in the logs folder with the logs, setup check and PC basics (user name and home folder taken out)."""
+    r = report.make_report()
+    if (request.get_json(silent=True) or {}).get("reveal", True):
+        _reveal(Path(r["file"]))
+    return jsonify(r)
+
+
+@app.route("/api/update")
+def update_status():
+    updates.start_background_check()        # normally already started with the app; this covers any other start
+    return jsonify(updates.status())
+
+
+@app.route("/api/update/dismiss", methods=["POST"])
+def update_dismiss():
+    updates.dismiss((request.get_json(silent=True) or {}).get("version", ""))
+    return jsonify({"ok": True})
 
 
 @app.route("/api/quit", methods=["POST"])

@@ -24,12 +24,12 @@ LOGS = BASE / "logs"
 CONFIG = BASE / "config.json"
 
 APP_NAME = "Open Skies"
-APP_VERSION = "0.1.0-beta.1"
+APP_VERSION = "0.1.0-beta.4"
 GAME_APPID = "2168680"
 GAME_EXE = "NuclearOption.exe"
 UNITY_VERSION = "2022.3.62f2"
 UNITY_CHANGESET = "7670c08855a9"
-USER_AGENT = f"OpenSkies/{APP_VERSION} (Nuclear Option map maker; local desktop app)"
+USER_AGENT = f"OpenSkies/{APP_VERSION} (Nuclear Option map maker; +https://github.com/metasprojects/open-skies)"
 # The notice the Nuclear Option EULA (19 Sept 2026) asks every mod to carry, verbatim.
 SHOCKFRONT_NOTICE = ('This project is an unofficial community modification and is not affiliated with, sponsored by, or en'
     'dorsed by Shockfront Studios Pty Ltd. Original Nuclear Option assets, vehicle designs, audio, and co'
@@ -252,8 +252,8 @@ def unity_licence() -> bool:
 
 # ---- machine ---------------------------------------------------------------------------------------
 
-def memory_mb() -> tuple[int, int]:
-    """(available physical MB, total physical MB)."""
+def memory_detail() -> dict:
+    """Free and total physical memory, and commit headroom (RAM plus page file), in MB. Empty if not Windows."""
     import ctypes
 
     class MS(ctypes.Structure):
@@ -265,12 +265,21 @@ def memory_mb() -> tuple[int, int]:
     m = MS()
     m.dwLength = ctypes.sizeof(MS)
     try:
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
-        # Commit headroom matters as much as free RAM: a full page file kills a process even with RAM free.
-        avail = min(m.ullAvailPhys, m.ullAvailPageFile)
-        return int(avail / 2**20), int(m.ullTotalPhys / 2**20)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+            return {}
+        return {"freeMB": int(m.ullAvailPhys / 2**20), "totalMB": int(m.ullTotalPhys / 2**20),
+                "commitFreeMB": int(m.ullAvailPageFile / 2**20), "commitTotalMB": int(m.ullTotalPageFile / 2**20)}
     except Exception:  # noqa: BLE001 - not Windows
+        return {}
+
+
+def memory_mb() -> tuple[int, int]:
+    """(available MB, total physical MB)."""
+    m = memory_detail()
+    if not m:
         return 4096, 8192
+    # Commit headroom matters as much as free RAM: a full page file kills a process even with RAM free.
+    return min(m["freeMB"], m["commitFreeMB"]), m["totalMB"]
 
 
 def free_gb(path: Path) -> float:

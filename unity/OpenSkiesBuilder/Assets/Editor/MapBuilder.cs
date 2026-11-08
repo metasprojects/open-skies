@@ -1,4 +1,4 @@
-// Builds a NOCustomMaps map bundle (.nomap) from a NO-Earth build folder.
+// Builds a NOCustomMaps map bundle (.nomap) from an Open Skies build folder.
 //
 // Run headless:
 //   Unity.exe -batchmode -nographics -quit -projectPath <this project> -executeMethod NOEarth.MapBuilder.Build
@@ -39,11 +39,12 @@ namespace NOEarth
         const int SeaStep = 5;
 
         [Serializable] class Assets { public string rootPrefab, terrainRoot, oceanBasecolor, oceanDepthmap, terrainColorMap,
-            terrainMacroColor, splatGrass, splatRock, splatLush, splatFields, airbases, mapImage, seaLanes, roadNetwork; }
+            terrainMacroColor, splatGrass, splatRock, splatLush, splatFields, airbases, mapImage, seaLanes, roadNetwork,
+            cityPlacements, treePositions; }
         [Serializable] class Manifest { public string mapId; public float mapSizeX; public Assets assets; }
-        [Serializable] class Runway { public float startX, startZ, endX, endZ, width; }
-        [Serializable] class Airbase { public string uniqueName; public float x, y, z, heading, runwayLength, runwayWidth;
-            public Runway[] extraRunways; }
+        [Serializable] class Runway { public float startX, startZ, endX, endZ, width; public string leIdent, heIdent; }
+        [Serializable] class Airbase { public string uniqueName; public float x, y, z, heading, runwayLength, runwayWidth,
+            flatHalfAlong, flatHalfAcross; public int apronSide; public string leIdent, heIdent; public Runway[] extraRunways; }
         [Serializable] class AirbaseList { public Airbase[] items; }
 
         public static void Build()
@@ -81,6 +82,11 @@ namespace NOEarth
                 File.Copy(Path.Combine(buildDir, "sealanes.bytes"), Path.Combine(AssetRoot, m.assets.seaLanes + ".bytes"), true);
             if (!string.IsNullOrEmpty(m.assets.roadNetwork) && File.Exists(Path.Combine(buildDir, "roads.bytes")))
                 File.Copy(Path.Combine(buildDir, "roads.bytes"), Path.Combine(AssetRoot, m.assets.roadNetwork + ".bytes"), true);
+            // Towns (NOCITY01 placements of the game's own city blocks) and trees, when their stages have run.
+            if (!string.IsNullOrEmpty(m.assets.cityPlacements) && File.Exists(Path.Combine(buildDir, "cities.bytes")))
+                File.Copy(Path.Combine(buildDir, "cities.bytes"), Path.Combine(AssetRoot, m.assets.cityPlacements + ".bytes"), true);
+            if (!string.IsNullOrEmpty(m.assets.treePositions) && File.Exists(Path.Combine(buildDir, "trees.bytes")))
+                File.Copy(Path.Combine(buildDir, "trees.bytes"), Path.Combine(AssetRoot, m.assets.treePositions + ".bytes"), true);
             var textures = new (string file, string name, bool srgb, bool mips, bool readable, TextureImporterFormat fmt, int max)[]
             {
                 ("macro.png", m.assets.terrainMacroColor, true, true, false, TextureImporterFormat.DXT1, 8192),
@@ -314,71 +320,357 @@ namespace NOEarth
             return mesh;
         }
 
+        // Airfields, laid out the way NOCustomMaps reads them (its MapFixups/AirfieldLayout and the Swiss Alps bundle):
+        //   Airfields/<base>/runway, runway_<k>   __BORROW__Runway, 7 cm over the levelled ground, UVs for the game's
+        //                                          runway1 texture (about 55 m across, 442 m along per repeat)
+        //   Airfields/<base>/tarmac               __BORROW__Tarmac, 6 cm up: the parallel taxiway, three links to the
+        //                                          runway and the apron the mission's hangars stand on (asphalt UVs,
+        //                                          22.3 by 177 m), on the side airbases.json names (apronSide)
+        //   Airfields/<base>/<base>_floor         invisible MeshCollider 1 cm over the levelled ground
+        //   AirfieldTireMarks/<base>              __TIREMARKS__Runway at each touchdown zone, shipped switched off
+        //   AirfieldMarkings/<base>               __MARKINGS__Runway: runway numbers, threshold, touchdown and
+        //                                          aiming-point bars, centre and edge lines, yellow taxi lines; 9 cm up,
+        //                                          UVs into the game's runway_markings atlas, white vertex colours,
+        //                                          shipped switched off (the loader swaps the material and shows it)
+        // Taxiway and apron offsets follow the loader's AirfieldLayout: taxiway centre at runway half-width + 125 m,
+        // 30 m wide; apron from there out to 120 m inside the levelled rectangle.
+        static Material Placeholder(string name)
+        {
+            var shader = Shader.Find("Unlit/Color") ?? Shader.Find("Standard") ?? Shader.Find("Sprites/Default");
+            var mat = new Material(shader) { name = name };
+            AssetDatabase.CreateAsset(mat, $"{AssetRoot}/{name}.mat");
+            return mat;
+        }
+
+        struct Rect2
+        {
+            public float a0, a1, c0, c1;
+            public Rect2(float a0, float a1, float c0, float c1) { this.a0 = a0; this.a1 = a1; this.c0 = c0; this.c1 = c1; }
+        }
+
         static void BuildAirfields(GameObject root, string buildDir)
         {
             string path = Path.Combine(buildDir, "airbases.json");
             if (!File.Exists(path)) return;
             var list = JsonUtility.FromJson<AirbaseList>("{\"items\":" + File.ReadAllText(path) + "}");
-            // A placeholder: NOCustomMaps swaps any material named __BORROW__Runway for the game's runway at load.
-            var shader = Shader.Find("Unlit/Color") ?? Shader.Find("Standard") ?? Shader.Find("Sprites/Default");
-            var runwayMat = new Material(shader) { name = "__BORROW__Runway" };
-            AssetDatabase.CreateAsset(runwayMat, $"{AssetRoot}/__BORROW__Runway.mat");
+            var runwayMat = Placeholder("__BORROW__Runway");
+            var tarmacMat = Placeholder("__BORROW__Tarmac");
+            var tireMat = Placeholder("__TIREMARKS__Runway");
             var fields = new GameObject("Airfields");
             fields.transform.SetParent(root.transform, false);
+            var tires = new GameObject("AirfieldTireMarks");
+            tires.transform.SetParent(root.transform, false);
+            var marksMat = Placeholder("__MARKINGS__Runway");
+            var marks = new GameObject("AirfieldMarkings");
+            marks.transform.SetParent(root.transform, false);
+            int paved = 0, painted = 0;
+            Func<float, float, Vector2> runwayUv = (al, ac) => new Vector2(0.5f + ac / 55f, al / 442f);
             foreach (var ab in list.items)
             {
                 var g = new GameObject(ab.uniqueName);
                 g.transform.SetParent(fields.transform, false);
                 float hr = ab.heading * Mathf.Deg2Rad;
-                Vector2 d = new Vector2(Mathf.Sin(hr), Mathf.Cos(hr)) * (ab.runwayLength / 2f);
-                AddStrip(g, "runway", new Vector2(ab.x - d.x, ab.z - d.y), new Vector2(ab.x + d.x, ab.z + d.y), ab.runwayWidth, ab.y, runwayMat);
+                var dir = new Vector2(Mathf.Sin(hr), Mathf.Cos(hr));
+                float sideSign = ab.apronSide < 0 ? -1f : 1f;
+                var across = new Vector2(dir.y, -dir.x) * sideSign;     // towards the apron
+                var c = new Vector2(ab.x, ab.z);
+                float L = ab.runwayLength, W = ab.runwayWidth;
+
+                AddSurface(g, "runway", c, dir, across, new[] { new Rect2(-L / 2, L / 2, -W / 2, W / 2) }, ab.y + 0.07f,
+                           runwayMat, runwayUv, 25f, true, true);
                 int k = 1;
                 foreach (var r in ab.extraRunways ?? Array.Empty<Runway>())
-                    AddStrip(g, $"runway_{k++}", new Vector2(r.startX, r.startZ), new Vector2(r.endX, r.endZ), r.width, ab.y, runwayMat);
+                {
+                    var a = new Vector2(r.startX, r.startZ);
+                    var b = new Vector2(r.endX, r.endZ);
+                    var d2 = (b - a).normalized;
+                    float hl = (b - a).magnitude / 2;
+                    AddSurface(g, $"runway_{k++}", (a + b) / 2f, d2, new Vector2(d2.y, -d2.x),
+                               new[] { new Rect2(-hl, hl, -r.width / 2, r.width / 2) }, ab.y + 0.07f, runwayMat, runwayUv,
+                               25f, true, true);
+                }
+
+                // Taxiway, three links to the runway, apron.
+                float twIn = W / 2 + 110f, twOut = W / 2 + 140f;
+                float apronOut = Mathf.Min(twOut + 240f, ab.flatHalfAcross - 120f);
+                float apronAlong = Mathf.Min(0.55f * ab.flatHalfAlong, 0.15f * ab.flatHalfAlong + 420f);
+                float tEnd = L / 2 - 60f;
+                var rects = new List<Rect2> { new Rect2(-tEnd, tEnd, twIn, twOut) };
+                foreach (float at in new[] { -tEnd, 0f, tEnd })
+                    rects.Add(new Rect2(at - 15f, at + 15f, W / 2 - 1f, twIn));
+                if (apronOut - twOut >= 120f)
+                    rects.Add(new Rect2(-apronAlong, apronAlong, twOut, apronOut));
+                AddSurface(g, "tarmac", c, dir, across, rects.ToArray(), ab.y + 0.06f, tarmacMat,
+                           (al, ac) => new Vector2(ac / 22.3f, al / 177f), 25f, true, true);
+
+                // Floor: collider only, over the whole levelled rectangle.
+                if (ab.flatHalfAlong > 0 && ab.flatHalfAcross > 0)
+                    AddSurface(g, ab.uniqueName + "_floor", c, dir, across,
+                               new[] { new Rect2(-ab.flatHalfAlong, ab.flatHalfAlong, -ab.flatHalfAcross, ab.flatHalfAcross) },
+                               ab.y + 0.01f, null, null, 100f, false, true);
+
+                // Tire marks at both touchdown zones, 150-750 m in, half the runway's width.
+                var tm = AddSurface(tires, ab.uniqueName, c, dir, across,
+                                    new[] { new Rect2(L / 2 - 750f, L / 2 - 150f, -W / 4, W / 4),
+                                            new Rect2(-L / 2 + 150f, -L / 2 + 750f, -W / 4, W / 4) },
+                                    ab.y + 0.075f, tireMat,
+                                    (al, ac) => new Vector2(ac / (W / 2) + 0.5f, Mathf.Repeat(Mathf.Abs(al), 600f) / 600f),
+                                    50f, true, false);
+                if (tm != null) tm.GetComponent<MeshRenderer>().enabled = false;      // the loader switches them on
+
+                // Paint: every runway's markings and the taxiway's yellow lines, one mesh per airfield.
+                var paint = new Paint();
+                PaintRunway(paint, c - dir * (L / 2), c + dir * (L / 2), W, ab.leIdent, ab.heIdent);
+                foreach (var r in ab.extraRunways ?? Array.Empty<Runway>())
+                    PaintRunway(paint, new Vector2(r.startX, r.startZ), new Vector2(r.endX, r.endZ), r.width, r.leIdent, r.heIdent);
+                float twMid = (twIn + twOut) / 2;
+                paint.Line(c + across * twMid - dir * tEnd, c + across * twMid + dir * tEnd, 0.5f, AtlasYellow);
+                foreach (float at in new[] { -tEnd, 0f, tEnd })
+                    paint.Line(c + dir * at + across * (W / 2 + 3f), c + dir * at + across * twMid, 0.5f, AtlasYellow);
+                var pm = paint.Build(marks, ab.uniqueName, ab.y + 0.09f, marksMat);
+                if (pm != null) { pm.GetComponent<MeshRenderer>().enabled = false; painted++; }  // the loader switches it on
+                paved++;
+            }
+            Debug.Log($"NOEARTH airfields: {paved} drawn (runway, taxiway, apron, floor, tire marks), {painted} painted");
+        }
+
+        // Runway paint, mapped onto the game's runway_markings atlas (runway_markings_b, 2048 px square, shader
+        // vertexColorAlphaClip: texture times vertex colour, alpha-clipped). Atlas columns, in Unity UVs (v up):
+        //   digits 0-9 in five rows down the left fifth; a plain bar (threshold and touchdown bars) at u .347-.432;
+        //   a wide block (aiming points) at u .451-.647; a full-height white line at u .660-.687 and a yellow one
+        //   at u .702-.729, both tiling along v. Measured from the game's own texture (2026-11-07).
+        static readonly int[] DigitLeftPx = { 250, 41, 176, 37, 243, 38, 250, 31, 230, 37 };
+        static readonly int[] DigitRightPx = { 431, 138, 350, 213, 423, 212, 426, 197, 406, 212 };
+        static readonly int[] DigitRowTopPx = { 1721, 46, 46, 465, 465, 883, 883, 1302, 1302, 1721 };   // rows 277 px tall
+        const float DigitFullPx = 181f;
+        static readonly Vector2 AtlasBar = new Vector2(0.350f, 0.429f);
+        static readonly Vector2 AtlasBlock = new Vector2(0.454f, 0.644f);
+        static readonly Vector2 AtlasWhite = new Vector2(0.662f, 0.684f);
+        static readonly Vector2 AtlasYellow = new Vector2(0.704f, 0.727f);
+
+        // Quads on the ground in world x/z, gathered into one mesh with UVs and white vertex colours.
+        class Paint
+        {
+            readonly List<Vector3> v = new List<Vector3>();
+            readonly List<Vector2> uv = new List<Vector2>();
+            readonly List<Color32> col = new List<Color32>();
+            readonly List<int> tri = new List<int>();
+
+            // A rectangle from origin o: len along unit f, wid along g = right of f. u runs u0..u1 across (along g),
+            // v runs v0..v1 along f. Split along f every 50 m.
+            public void Quad(Vector2 o, Vector2 f, float len, float wid, float u0, float u1, float v0, float v1)
+            {
+                var g = new Vector2(f.y, -f.x);
+                int n = Mathf.Max(1, Mathf.CeilToInt(len / 50f));
+                int b = v.Count;
+                for (int i = 0; i <= n; i++)
+                {
+                    float k = (float)i / n;
+                    Vector2 p = o + f * (len * k), q = p + g * wid;
+                    float vv = Mathf.Lerp(v0, v1, k);
+                    v.Add(new Vector3(p.x, 0f, p.y)); uv.Add(new Vector2(u0, vv));
+                    v.Add(new Vector3(q.x, 0f, q.y)); uv.Add(new Vector2(u1, vv));
+                    col.Add(new Color32(255, 255, 255, 255)); col.Add(new Color32(255, 255, 255, 255));
+                }
+                // g is right of f, so (p_i, p_i+1, q_i) is clockwise seen from above: the face points up.
+                for (int i = 0; i < n; i++)
+                {
+                    int a = b + 2 * i;
+                    tri.Add(a); tri.Add(a + 2); tri.Add(a + 1);
+                    tri.Add(a + 1); tri.Add(a + 2); tri.Add(a + 3);
+                }
+            }
+
+            // A line of width w centred on a..b, from one of the tiling atlas columns (about 40 m per repeat).
+            public void Line(Vector2 a, Vector2 b, float w, Vector2 column)
+            {
+                float len = (b - a).magnitude;
+                if (len < 1f) return;
+                var f = (b - a) / len;
+                var g = new Vector2(f.y, -f.x);
+                Quad(a - g * (w / 2), f, len, w, column.x, column.y, 0f, len / 40f);
+            }
+
+            public GameObject Build(GameObject parent, string name, float y, Material mat)
+            {
+                if (v.Count == 0) return null;
+                var go = new GameObject(name);
+                go.transform.SetParent(parent.transform, false);
+                // Vertices relative to the first one keep the floats small; the object sits there instead.
+                Vector3 o0 = v[0];
+                for (int i = 0; i < v.Count; i++) v[i] -= o0;
+                go.transform.localPosition = new Vector3(o0.x, y, o0.z);
+                var mesh = new Mesh
+                {
+                    name = ("marks_" + name).Replace(' ', '_'),
+                    indexFormat = v.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16
+                };
+                mesh.SetVertices(v);
+                mesh.SetUVs(0, uv);
+                mesh.SetColors(col);
+                mesh.SetTriangles(tri, 0);
+                mesh.RecalculateNormals();
+                mesh.RecalculateTangents();
+                mesh.RecalculateBounds();
+                AssetDatabase.CreateAsset(mesh, $"{AssetRoot}/Meshes/{mesh.name}.asset");
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+                return go;
             }
         }
 
-        static void AddStrip(GameObject parent, string name, Vector2 a, Vector2 b, float width, float y, Material mat)
+        // A runway number 1-36 from a designator ("05L" -> 5), or from the heading when it has no digits.
+        static int RunwayNumber(string ident, float headingDeg)
         {
-            Vector2 dir = (b - a).normalized;
-            Vector2 side = new Vector2(dir.y, -dir.x) * (width / 2f);
-            Vector2 c = (a + b) / 2f;
-            var go = new GameObject(name);
-            go.transform.SetParent(parent.transform, false);
-            go.transform.localPosition = new Vector3(c.x, y + 0.05f, c.y);
-            var mesh = new Mesh { name = parent.name + "_" + name };
-            Vector3 P(Vector2 v) => new Vector3(v.x - c.x, 0f, v.y - c.y);
-            // Tessellated: PhysX refuses to cook a collider from triangles kilometres long.
-            float len = (b - a).magnitude;
-            int along = Mathf.Max(1, Mathf.CeilToInt(len / 25f));
-            int across = Mathf.Max(1, Mathf.CeilToInt(width / 25f));
+            int n = 0, digits = 0;
+            foreach (char ch in ident ?? "")
+            {
+                if (ch < '0' || ch > '9') break;
+                n = n * 10 + (ch - '0'); digits++;
+            }
+            if (digits == 0 || n < 1 || n > 36)
+            {
+                n = Mathf.RoundToInt(Mathf.Repeat(headingDeg, 360f) / 10f);
+                if (n == 0) n = 36;
+            }
+            return n;
+        }
+
+        // Markings for one runway from its low end le to its high end he: both ends' threshold bars, numbers,
+        // touchdown and aiming-point bars, then the centreline dashes and the two edge lines.
+        static void PaintRunway(Paint p, Vector2 le, Vector2 he, float W, string leIdent, string heIdent)
+        {
+            float L = (he - le).magnitude;
+            if (L < 200f || W < 8f) return;
+            var d = (he - le) / L;
+            float hdg = Mathf.Atan2(d.x, d.y) * Mathf.Rad2Deg;
+            float numbersEnd = PaintEnd(p, le, d, L, W, RunwayNumber(leIdent, hdg));
+            PaintEnd(p, he, -d, L, W, RunwayNumber(heIdent, hdg + 180f));
+            var r = new Vector2(d.y, -d.x);
+            float lw = W >= 30f ? 0.9f : 0.6f;
+            float edge = W / 2 - 1.2f;
+            p.Line(le + r * edge, he + r * edge, lw, AtlasWhite);
+            p.Line(le - r * edge, he - r * edge, lw, AtlasWhite);
+            float cw = W >= 30f ? 0.9f : 0.45f;
+            for (float a = numbersEnd + 20f; a + 30f <= L - numbersEnd - 20f; a += 50f)
+                p.Quad(le + d * a - r * (cw / 2), d, 30f, cw, AtlasWhite.x, AtlasWhite.y, 0f, 0.75f);
+        }
+
+        // One runway end at T, f pointing into the runway. Returns how far in its numbers reach.
+        static float PaintEnd(Paint p, Vector2 T, Vector2 f, float L, float W, int number)
+        {
+            var g = new Vector2(f.y, -f.x);            // right of the landing direction
+            bool wide = W >= 30f;
+            // Threshold bars, 6-36 m in, in two groups either side of the centreline.
+            float bw = wide ? 1.8f : 1.2f;
+            for (int i = 0; i < 8; i++)
+            {
+                float inner = bw + i * 2 * bw;
+                if (inner + bw > W / 2 - 3f) break;
+                foreach (float side in new[] { -1f, 1f })
+                {
+                    float t0 = side > 0 ? inner : -inner - bw;
+                    p.Quad(T + f * 6f + g * t0, f, 30f, bw, AtlasBar.x, AtlasBar.y, 0.02f, 0.98f);
+                }
+            }
+            // The number, read upright by a pilot landing over this end: two digits side by side.
+            float h = Mathf.Clamp(W * 0.4f, 9f, 18f), dw = h / 3f, gap = h / 6f, s0 = 48f;
+            for (int k = 0; k < 2; k++)
+            {
+                int digit = k == 0 ? number / 10 : number % 10;
+                float px = DigitRightPx[digit] - DigitLeftPx[digit];
+                float qw = dw * Mathf.Min(1f, px / DigitFullPx);
+                float slot = k == 0 ? -dw - gap / 2 : gap / 2;
+                float u0 = (DigitLeftPx[digit] - 3) / 2048f, u1 = (DigitRightPx[digit] + 4) / 2048f;
+                float vTop = 1f - (DigitRowTopPx[digit] - 3) / 2048f, vBottom = 1f - (DigitRowTopPx[digit] + 280) / 2048f;
+                p.Quad(T + f * s0 + g * (slot + (dw - qw) / 2), f, h, qw, u0, u1, vBottom, vTop);
+            }
+            float numbersEnd = s0 + h;
+            // Touchdown-zone bars (150-900 m in) and the aiming point (300 m in), on runways long enough for them.
+            float inner2 = W * 0.2f, tb = wide ? 1.8f : 1.2f;
+            var zones = new[] { (150f, 3), (300f, 0), (450f, 2), (600f, 2), (750f, 1), (900f, 1) };
+            foreach (var (s, n) in zones)
+            {
+                if (s + 45f > L / 2 - 30f) break;
+                foreach (float side in new[] { -1f, 1f })
+                {
+                    if (n == 0)
+                    {
+                        if (L < 1200f) continue;
+                        float aw = Mathf.Clamp(W * 0.2f, 4f, 9f);
+                        float t0 = side > 0 ? inner2 : -inner2 - aw;
+                        p.Quad(T + f * s + g * t0, f, 45f, aw, AtlasBlock.x, AtlasBlock.y, 0.02f, 0.98f);
+                        continue;
+                    }
+                    if (L < 1500f) continue;
+                    for (int i = 0; i < n; i++)
+                    {
+                        float a0 = inner2 + i * 2 * tb;
+                        if (a0 + tb > W / 2 - 3f) break;
+                        float t0 = side > 0 ? a0 : -a0 - tb;
+                        p.Quad(T + f * s + g * t0, f, 22.5f, tb, AtlasBar.x, AtlasBar.y, 0.02f, 0.98f);
+                    }
+                }
+            }
+            return numbersEnd;
+        }
+
+        // One mesh of rectangles in an airfield's own frame (along the runway, across towards the apron),
+        // tessellated so no triangle is too large for PhysX. render false: collider only.
+        static GameObject AddSurface(GameObject parent, string name, Vector2 centre, Vector2 dir, Vector2 across,
+                                     Rect2[] rects, float y, Material mat, Func<float, float, Vector2> uv, float cell,
+                                     bool render, bool collider)
+        {
             var verts = new List<Vector3>();
             var uvs = new List<Vector2>();
-            for (int i = 0; i <= along; i++)
-            for (int k = 0; k <= across; k++)
-            {
-                float t = (float)i / along, s = (float)k / across;
-                verts.Add(P(Vector2.Lerp(a, b, t) + side * (2f * s - 1f)));
-                uvs.Add(new Vector2(s, t * len / width));
-            }
             var tris = new List<int>();
-            int row = across + 1;
-            for (int i = 0; i < along; i++)
-            for (int k = 0; k < across; k++)
+            // Front faces must point up: Unity's front face is clockwise seen from that side.
+            bool flip = dir.x * across.y - dir.y * across.x > 0;
+            foreach (var r in rects)
             {
-                int v = i * row + k;
-                tris.Add(v); tris.Add(v + row); tris.Add(v + 1);
-                tris.Add(v + 1); tris.Add(v + row); tris.Add(v + row + 1);
+                int na = Mathf.Max(1, Mathf.CeilToInt((r.a1 - r.a0) / cell));
+                int nc = Mathf.Max(1, Mathf.CeilToInt((r.c1 - r.c0) / cell));
+                int baseIdx = verts.Count;
+                for (int i = 0; i <= na; i++)
+                for (int j = 0; j <= nc; j++)
+                {
+                    float al = Mathf.Lerp(r.a0, r.a1, (float)i / na), ac = Mathf.Lerp(r.c0, r.c1, (float)j / nc);
+                    Vector2 q = dir * al + across * ac;
+                    verts.Add(new Vector3(q.x, 0f, q.y));
+                    uvs.Add(uv != null ? uv(al, ac) : Vector2.zero);
+                }
+                int row = nc + 1;
+                for (int i = 0; i < na; i++)
+                for (int j = 0; j < nc; j++)
+                {
+                    int v = baseIdx + i * row + j;
+                    if (!flip) { tris.Add(v); tris.Add(v + row); tris.Add(v + 1); tris.Add(v + 1); tris.Add(v + row); tris.Add(v + row + 1); }
+                    else { tris.Add(v); tris.Add(v + 1); tris.Add(v + row); tris.Add(v + 1); tris.Add(v + row + 1); tris.Add(v + row); }
+                }
             }
+            if (verts.Count == 0) return null;
+            var go = new GameObject(name);
+            go.transform.SetParent(parent.transform, false);
+            go.transform.localPosition = new Vector3(centre.x, y, centre.y);
+            var mesh = new Mesh
+            {
+                name = (parent.name + "_" + name).Replace(' ', '_'),
+                indexFormat = verts.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16
+            };
             mesh.SetVertices(verts);
             mesh.SetUVs(0, uvs);
             mesh.SetTriangles(tris, 0);
             mesh.RecalculateNormals();
+            mesh.RecalculateTangents();
             mesh.RecalculateBounds();
-            AssetDatabase.CreateAsset(mesh, $"{AssetRoot}/Meshes/{mesh.name.Replace(' ', '_')}.asset");
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
-            go.AddComponent<MeshCollider>().sharedMesh = mesh;
+            AssetDatabase.CreateAsset(mesh, $"{AssetRoot}/Meshes/{mesh.name}.asset");
+            if (render)
+            {
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            }
+            if (collider) go.AddComponent<MeshCollider>().sharedMesh = mesh;
+            return go;
         }
 
         // Minimal .npy reader: little-endian float32, C order, 2-D.

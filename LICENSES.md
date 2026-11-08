@@ -26,6 +26,7 @@ MIT, copyright (c) 2026 Meta. See `LICENSE.txt`.
 - **BepInEx** (LGPL-2.1): the mod loader. Setup downloads the official release (5.4.23.4) and checks it.
 - **Leaflet** 1.9.4 (BSD-2-Clause, (c) Volodymyr Agafonkin): bundled in `static/vendor/leaflet` with its licence.
 - **Unity** 2022.3.62f2: installed through Unity Hub under the player's own free Unity licence. Not bundled.
+- **Python** 3.13.7 (PSF License): setup downloads the official python.org build (published as a NuGet package).
 - Python packages (installed by setup, not bundled): Flask, pywebview, requests, NumPy, SciPy, rasterio/GDAL,
   pyproj/PROJ, Shapely/GEOS, DuckDB, scikit-image, Pillow, each under its own licence.
 
@@ -35,10 +36,13 @@ MIT, copyright (c) 2026 Meta. See `LICENSE.txt`.
 |---|---|---|---|
 | Elevation | Copernicus DEM GLO-30, AWS Open Data | Copernicus DEM licence | the full modified-data notice and liability sentence |
 | Land cover | ESA WorldCover 10 m 2021 v200 | CC BY 4.0 | yes |
-| Roads, buildings, ferries, places | OpenStreetMap via Overture Maps | ODbL 1.0 (OSM parts), CDLA-Permissive-2.0 | yes; the data is exported on request (Export OSM data) |
+| Roads and ferries | Overture Maps transportation: (c) OpenStreetMap contributors, TomTom | ODbL 1.0 | yes; the OpenStreetMap data is exported on request (Export OSM data) |
+| Buildings | Overture Maps buildings: (c) OpenStreetMap contributors; Esri Community Maps contributors (CC BY 4.0); Microsoft Global ML Building Footprints (ODbL); Google Open Buildings (CC BY 4.0); USGS 3D Elevation Program; Qian Shi et al. 2023, doi:10.5281/zenodo.8174931 (CC BY 4.0); work derived from BTN 2024, ign.es (CC BY 4.0) | ODbL 1.0 | short form in the map, full list in its README.txt |
+| Water, land use, infrastructure | Overture Maps base: (c) OpenStreetMap contributors; Daylight Map Distribution; ESA WorldCover 2020 (CC BY 4.0); ETOPO1 (ODC PDDL); GLOBathy (CC0) | ODbL 1.0 | short form in the map, full list in its README.txt |
+| Places | Overture Maps places: data from Meta, DAC, BrightQuery, Uberall and OpenTravel Alliance | CDLA Permissive 2.0 | short form in the map, full list in its README.txt |
 | Ship traffic | World Bank / IMF Global Shipping Traffic Density | CC BY 4.0 | yes |
 | Airports and runways | OurAirports | public domain | yes |
-| Sea floor | AWS Terrain Tiles (ETOPO1, GEBCO, NOAA) | per tilezen/joerd attribution | in README.txt |
+| Sea floor | AWS Terrain Tiles (ETOPO1, GEBCO, NOAA) | per the tilezen/joerd attribution list (https://github.com/tilezen/joerd/blob/master/docs/attribution.md) | in README.txt, with that link |
 | Map background, search | OpenStreetMap tiles, Nominatim | ODbL, usage policies | on screen |
 
 Map tiles and searches go through Open Skies' own local server with its own User-Agent and a cache, as the

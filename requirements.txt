@@ -2,7 +2,7 @@
 flask>=3.0,<4
 pywebview>=5.0,<7
 requests==2.34.2
-# The map pipeline, at the versions NO-Earth's pipeline is tested with
+# The map pipeline, at the versions it is tested with
 numpy==2.4.6
 scipy==1.17.1
 rasterio==1.4.4
