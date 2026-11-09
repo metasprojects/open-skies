@@ -71,7 +71,8 @@ Map data: Copernicus DEM; OpenStreetMap contributors, Overture Maps and others.
 ## Multiplayer
 
 Everyone needs the same build of a map: share the `.nomap` file from the map's folder instead of building it
-again. The map loader can't read maps from Workshop downloads yet, so maps are shared as files.
+again. The Nuclear Option Steam Workshop only takes missions and liveries, so share maps as files (on NOMNOM, GitHub or
+elsewhere). Missions made for your map can go on the Workshop.
 
 ## Problems
 

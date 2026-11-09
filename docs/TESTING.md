@@ -59,7 +59,7 @@ It sends nothing about you or your PC. New versions are downloaded by hand: unzi
 - The Escalation and Strike missions are made from the map's airbases. Where they can't fit (for example a side
   whose airbases have no flat room for hangars and no sea for a carrier), the map gets Free Flight only and the
   build says why.
-- Maps are installed on your own PC. The map loader can't load maps from the Steam Workshop yet, so players share
-  the `.nomap` file directly.
+- Maps are installed on your own PC. The Nuclear Option Steam Workshop only takes missions and liveries, so players
+  share the `.nomap` file directly (NOMNOM, GitHub or elsewhere).
 - Roads are thin from high up, like real roads.
 - A game update that changes the game's Unity version needs a new Open Skies.
